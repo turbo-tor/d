@@ -1,266 +1,247 @@
-import flet
-from flet import Page, Text, ElevatedButton, Column, Row, Dropdown, dropdown, AlertDialog, TextField, Container
-import datetime
-import json
-import os
+name: All Builds (Linux, macOS, Windows, Android, IPA, APK, AAB)
 
-DATA_FILE = "attendance_flet.json"
+on:
+  # Runs on push to any of the below branches
+  push:
+    branches:
+      - master
+      - main
+  # Runs on pull request events that target one of the below branches
+  pull_request:
+    branches:
+      - master
+      - main
 
-if not os.path.exists(DATA_FILE):
-    with open(DATA_FILE, 'w') as f:
-        json.dump({}, f)
+  # Allows you to run this workflow manually from the Actions tab of the repository
+  workflow_dispatch:
 
-def load_data():
-    with open(DATA_FILE, 'r') as f:
-        return json.load(f)
+env:
+  # https://flet.dev/docs/publish#versioning
+  BUILD_NUMBER: 1
+  BUILD_VERSION: 1.0.0
+  PYTHON_VERSION: 3.12.2
+  FLUTTER_VERSION: 3.22.2
 
-def save_data(data):
-    with open(DATA_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
 
-def get_daily_salary(date_obj):
-    return 225 if date_obj.weekday() == 4 else 175  # الجمعة = 4
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-def main(page: Page):
-    page.title = "روزن - سجل الحضور"
-    page.vertical_alignment = "start"
-    page.padding = 20
+    - name: Setup Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
 
-    today = datetime.date.today()
-    current_year = today.year
-    current_month = today.month
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-    data = load_data()
+    - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ env.FLUTTER_VERSION }}
 
-    title = Text("روزن", size=40, weight="bold", color="#D2691E")
-    page.add(title)
+    - name: Patch for linux build
+      run: |
+        flutter doctor
+        sudo apt-get update -y
+        sudo apt-get install -y ninja-build libgtk-3-dev
+        flutter doctor
 
-    years_range = list(range(today.year - 5, today.year + 6))
-    year_dropdown = Dropdown(
-        label="السنة",
-        width=150,
-        options=[dropdown.Option(str(y)) for y in years_range],
-        value=str(current_year)
-    )
+    - name: Flet Build Linux
+      run: |
+        flutter config --no-analytics 
+        flet build linux --verbose --build-number=$BUILD_NUMBER --build-version=$BUILD_VERSION
 
-    months_names = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-                    "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
-    month_dropdown = Dropdown(
-        label="الشهر",
-        width=150,
-        options=[dropdown.Option(f"{i+1} - {months_names[i]}") for i in range(12)],
-        value=f"{current_month} - {months_names[current_month - 1]}"
-    )
+    - name: Upload Linux Artifact
+      uses: actions/upload-artifact@v4.3.4
+      with:
+        name: linux-build-artifact
+        path: build/linux
+        if-no-files-found: warn
+        overwrite: false
 
-    days_column = Column()
-    total_text = Text("", size=18, weight="bold", color="green")
+  build-macos:
+    runs-on: macos-latest
 
-    def get_days_in_month(year, month):
-        if month == 12:
-            next_month = datetime.date(year + 1, 1, 1)
-        else:
-            next_month = datetime.date(year, month + 1, 1)
-        return (next_month - datetime.timedelta(days=1)).day
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-    def refresh_days():
-        days_column.controls.clear()
-        y = int(year_dropdown.value)
-        m = int(month_dropdown.value.split(" - ")[0])
-        days_in_month = get_days_in_month(y, m)
+    - name: Setup Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
 
-        def day_button_click(day):
-            date_str = f"{y}-{m:02d}-{day:02d}"
-            date_obj = datetime.date(y, m, day)
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-            def open_edit_dialog():
-                salary_field.value = str(data[date_str])
-                dlg_modal.open = True
-                page.update()
+    - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ env.FLUTTER_VERSION }}
 
-                def on_save_click(e):
-                    try:
-                        new_salary = float(salary_field.value)
-                        if new_salary < 0:
-                            page.snack_bar = flet.SnackBar(Text("السعر لازم يكون موجب"))
-                            page.snack_bar.open = True
-                            page.update()
-                            return
-                        data[date_str] = new_salary
-                        save_data(data)
-                        refresh_days()
-                        update_total()
-                        dlg_modal.open = False
-                        page.update()
-                    except:
-                        page.snack_bar = flet.SnackBar(Text("ادخل رقم صحيح"))
-                        page.snack_bar.open = True
-                        page.update()
+    - name: Flet Build macOS
+      run: |
+        flutter config --no-analytics
+        flet build macos --verbose --build-number=$BUILD_NUMBER --build-version=$BUILD_VERSION
 
-                def on_delete_click(e):
-                    if date_str in data:
-                        del data[date_str]
-                        save_data(data)
-                        refresh_days()
-                        update_total()
-                    dlg_modal.open = False
-                    page.update()
+    - name: Upload macOS Artifact
+      uses: actions/upload-artifact@v4.3.4
+      with:
+        name: macos-build-artifact
+        path: build/macos
+        if-no-files-found: warn
+        overwrite: false
 
-                save_button.on_click = on_save_click
-                delete_button.on_click = on_delete_click
+  build-windows:
+    runs-on: windows-latest
 
-            if date_str not in data:
-                salary = get_daily_salary(date_obj)
-                data[date_str] = salary
-                save_data(data)
-                refresh_days()
-                update_total()
-                open_edit_dialog()
-            else:
-                open_edit_dialog()
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-        row_controls = []
-        for day in range(1, days_in_month + 1):
-            date_str = f"{y}-{m:02d}-{day:02d}"
-            salary = data.get(date_str)
-            date_obj = datetime.date(y, m, day)
-            btn_text = f"{day}"
+    - name: Setup Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
 
-            if salary is not None:
-                btn_text += f"\n{int(salary)} ج"
-                btn_color = "#90EE90"
-            elif date_obj.weekday() == 4:
-                btn_color = "#FFFACD"
-            else:
-                btn_color = "#FFFFFF"
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-            btn = ElevatedButton(
-                text=btn_text,
-                width=50,
-                height=50,
-                bgcolor=btn_color,
-                on_click=lambda e, d=day: day_button_click(d)
-            )
-            row_controls.append(btn)
-            if len(row_controls) == 7:
-                days_column.controls.append(Row(row_controls, spacing=5))
-                row_controls = []
-        if row_controls:
-            days_column.controls.append(Row(row_controls, spacing=5))
+    - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ env.FLUTTER_VERSION }}
 
-        page.update()
+    - name: Flet Build Windows
+      run: |
+        flutter config --no-analytics
+        flet build windows --verbose --no-rich-output --build-number=$env:BUILD_NUMBER --build-version=$env:BUILD_VERSION
 
-    def update_total():
-        y = int(year_dropdown.value)
-        m = int(month_dropdown.value.split(" - ")[0])
-        total_days = 0
-        total_salary = 0
-        for date_str, salary in data.items():
-            dt = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-            if dt.year == y and dt.month == m:
-                total_days += 1
-                total_salary += salary
-        total_text.value = f"📊 عدد الأيام: {total_days} - الإجمالي: {total_salary} جنيه"
-        page.update()
+    - name: Upload Windows Artifact
+      uses: actions/upload-artifact@v4.3.4
+      with:
+        name: windows-build-artifact
+        path: build/windows
+        if-no-files-found: warn
+        overwrite: false
 
-    # ✅ تعديل يوم معين تطلبه انت
-    def edit_custom_day(e):
-        def on_submit_day(e):
-            try:
-                day_num = int(day_input.value)
-                y = int(year_dropdown.value)
-                m = int(month_dropdown.value.split(" - ")[0])
-                days_in_month = get_days_in_month(y, m)
+  build-aab:
+    runs-on: macos-latest
 
-                if not (1 <= day_num <= days_in_month):
-                    raise ValueError("خارج نطاق الشهر")
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-                date_str = f"{y}-{m:02d}-{day_num:02d}"
-                if date_str not in data:
-                    page.snack_bar = flet.SnackBar(Text("❗ اليوم غير مسجل بعد!"))
-                    page.snack_bar.open = True
-                    page.update()
-                    return
+    - name: Setup Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
 
-                # افتح نافذة التعديل
-                salary_field.value = str(data[date_str])
-                dlg_modal.open = True
-                day_dialog.open = False
-                page.update()
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-                def on_save_click(e):
-                    try:
-                        new_salary = float(salary_field.value)
-                        data[date_str] = new_salary
-                        save_data(data)
-                        refresh_days()
-                        update_total()
-                        dlg_modal.open = False
-                        page.update()
-                    except:
-                        page.snack_bar = flet.SnackBar(Text("❌ ادخل رقم صحيح"))
-                        page.snack_bar.open = True
-                        page.update()
+    - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ env.FLUTTER_VERSION }}
 
-                def on_delete_click(e):
-                    del data[date_str]
-                    save_data(data)
-                    refresh_days()
-                    update_total()
-                    dlg_modal.open = False
-                    page.update()
+    - name: Flet Build AAB
+      run: |
+        flutter config --no-analytics
+        flet build aab --verbose --build-number=$BUILD_NUMBER --build-version=$BUILD_VERSION
 
-                save_button.on_click = on_save_click
-                delete_button.on_click = on_delete_click
+    - name: Upload AAB Artifact
+      uses: actions/upload-artifact@v4.3.4
+      with:
+        name: aab-build-artifact
+        path: build/aab
+        if-no-files-found: warn
+        overwrite: false
 
-            except:
-                page.snack_bar = flet.SnackBar(Text("❗ ادخل رقم يوم صحيح"))
-                page.snack_bar.open = True
-                page.update()
+  build-apk:
+    runs-on: ubuntu-latest
 
-        day_input = TextField(label="رقم اليوم", keyboard_type="number", width=150)
-        day_dialog = AlertDialog(
-            modal=True,
-            title=Text("اختيار يوم للتعديل"),
-            content=day_input,
-            actions=[
-                ElevatedButton("التالي", on_click=on_submit_day),
-                ElevatedButton("إلغاء", on_click=lambda e: day_dialog.close())
-            ]
-        )
-        page.dialog = day_dialog
-        day_dialog.open = True
-        page.update()
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-    year_dropdown.on_change = lambda e: (refresh_days(), update_total())
-    month_dropdown.on_change = lambda e: (refresh_days(), update_total())
+    - name: Setup Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
 
-    salary_field = TextField(label="السعر", width=200, keyboard_type="number")
-    save_button = ElevatedButton("حفظ", on_click=lambda e: None)
-    delete_button = ElevatedButton("حذف", on_click=lambda e: None)
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-    dlg_modal = AlertDialog(
-        modal=True,
-        title=Text("تعديل السعر"),
-        content=salary_field,
-        actions=[
-            save_button,
-            delete_button,
-            ElevatedButton("إلغاء", on_click=lambda e: dlg_modal.close())
-        ],
-    )
+    - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ env.FLUTTER_VERSION }}
 
-    page.dialog = dlg_modal
+    - name: Setup Java JDK
+      uses: actions/setup-java@v4.2.1
+      with:
+        distribution: 'temurin'
+        java-version: '21'
 
-    controls = Column([
-        Row([year_dropdown, month_dropdown], alignment="start", spacing=20),
-        Container(content=Text("اختر يوم العمل:", size=16, weight="bold"), margin=10),
-        days_column,
-        total_text,
-        ElevatedButton("✏️ تعديل سعر يوم معين", on_click=edit_custom_day, bgcolor="#FFA07A", color="white")
-    ])
+    - name: Flet Build APK
+      run: |
+        flutter config --no-analytics
+        flet build apk --verbose --build-number=$BUILD_NUMBER --build-version=$BUILD_VERSION
 
-    page.add(controls)
-    refresh_days()
-    update_total()
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4.3.4
+      with:
+        name: apk-build-artifact
+        path: build/apk
+        if-no-files-found: warn
+        overwrite: false
 
-flet.app(target=main)
+  build-ipa:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ env.FLUTTER_VERSION }}
+
+    - name: Flet Build IPA
+      run: |
+        flutter config --no-analytics
+        flet build ipa --verbose --build-number=$BUILD_NUMBER --build-version=$BUILD_VERSION 
+
+    - name: Upload IPA Artifact
+      uses: actions/upload-artifact@v4.3.4
+      with:
+        name: ipa-build-artifact
+        path: build/ipa
+        if-no-files-found: warn
+        overwrite: fals
