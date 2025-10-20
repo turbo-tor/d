@@ -1,0 +1,3 @@
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, 'w') as f:
+        json.dump({}, f)
